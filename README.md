@@ -1,4 +1,4 @@
-# Hybrid SOC Lab — On-Prem Active Directory into Microsoft Sentinel
+# Hybrid SOC Lab - On-Prem Active Directory into Microsoft Sentinel
 
 A self-built, hybrid Security Operations lab. An on-premises Windows Active Directory
 domain runs on local hardware and ships its security and endpoint telemetry into
