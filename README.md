@@ -135,6 +135,9 @@ Add-Computer -DomainName "corp.lab" -Credential CORP\Administrator -Restart
 # Sysmon on both hosts (community config)
 .\Sysmon64.exe -accepteula -i sysmonconfig.xml
 ```
+<img width="1132" height="952" alt="AD DS" src="https://github.com/user-attachments/assets/06cf5e3f-743e-4ba9-a7e5-ff968baabfd9" />
+
+
 
 ### Phase 2 — Cloud SIEM pipeline
 
