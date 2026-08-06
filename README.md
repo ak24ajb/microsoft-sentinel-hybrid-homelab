@@ -109,7 +109,6 @@ controlled as Sigma and compiled to KQL.
 
 ## Build
 
-> Commands below are representative. Secrets are shown as placeholders and were never committed.
 
 ### Phase 1 — On-prem Active Directory
 
@@ -139,6 +138,8 @@ Add-Computer -DomainName "corp.lab" -Credential CORP\Administrator -Restart
 
 ### Phase 2 — Cloud SIEM pipeline
 
+<img width="1071" height="631" alt="Screenshot 2026-06-24 024243" src="https://github.com/user-attachments/assets/761c0160-db3d-4a1f-a45a-45a3870aee30" />
+
 ```powershell
 # Workspace + Sentinel + cost cap, via Azure CLI (portal region selection blocked by policy)
 $LOC = "francecentral"
@@ -159,6 +160,12 @@ creation and privileged-group membership (`4720`/`4728`/`4732`/`4756`), Kerberos
 authentication (`4768`/`4769`/`4776`), service installation (`7045`) and PowerShell
 script-block logging (`4104`) — scoped to keep ingestion volume small.
 
+<img width="1562" height="1287" alt="Untitled design" src="https://github.com/user-attachments/assets/c31d437b-7249-4b89-bcda-9e5a90f8db47" />
+
+
+<img width="947" height="896" alt="Screenshot 2026-07-16 170850" src="https://github.com/user-attachments/assets/c7ffdb5a-330a-428a-bc10-017dae0bbd8a" />
+
+
 ### Phase 2 — Detection engineering
 
 - **Azure Activity** connector enabled (subscription-scoped) for control-plane monitoring.
@@ -168,6 +175,8 @@ script-block logging (`4104`) — scoped to keep ingestion volume small.
   pySigma Kusto backend (see [Detection-as-code](#detection-as-code)).
 
 ---
+
+
 
 ## Detections
 
@@ -186,6 +195,9 @@ SecurityEvent
 | where FailedAttempts >= 5
 ```
 
+<img width="1657" height="736" alt="Screenshot 2026-07-16 172714" src="https://github.com/user-attachments/assets/8b7b7839-d41a-4f6f-a061-73961a26b9ea" />
+
+
 **Persistence — User Added to Privileged Group** · Severity High · MITRE **T1098 / T1078.002**
 
 ```kql
@@ -200,7 +212,8 @@ SecurityEvent
 Both rules use entity mapping (Host / Account) so Sentinel builds an investigation graph
 and correlates incidents to the affected assets.
 
-> Add screenshots of a fired incident to `docs/` and reference here as evidence.
+<img width="1261" height="887" alt="Screenshot 2026-07-16 172822" src="https://github.com/user-attachments/assets/32827ec2-ce2f-4d74-8556-24d0807d5fe5" />
+
 
 ---
 
@@ -302,7 +315,7 @@ entity mapping · detection engineering · **detection-as-code (Sigma → KQL, p
 Azure Arc · Azure Monitor Agent · Data Collection Rules · Sysmon · MITRE ATT&CK ·
 Windows Active Directory (AD DS, DNS, DHCP) · Hyper-V · Azure CLI · PowerShell · SIEM cost control.
 
-Doubles as hands-on preparation for **SC-200** and **AZ-500**.
+Doubles as hands-on preparation for **SC-900** and **AZ-500**.
 
 ---
 
