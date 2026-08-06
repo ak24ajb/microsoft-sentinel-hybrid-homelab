@@ -10,6 +10,9 @@ Built to be reproducible, threat-informed and documented to a professional stand
 not a single-box tutorial. It is an active, growing project; see the [Roadmap](#roadmap)
 for what is built versus planned.
 
+NOTE: I used my student to redeem $100 in Azure credits and build the cloud infrastructure.
+I also enrolled into SC-900 side-by-side which was great learning experience.
+
 ---
 
 ## Status
