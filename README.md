@@ -83,8 +83,11 @@ controlled as Sigma and compiled to KQL.
 ---
 
 ## Environment
-[Screenshot 2026-06-24 134119.png
-](https://github.com/ak24ajb/microsoft-sentinel-hybrid-homelab/blob/screenshots/Screenshot%202026-06-24%20134119.png)| Component | Detail |
+
+https://github.com/ak24ajb/microsoft-sentinel-hybrid-homelab/blob/screenshots/Screenshot%202026-06-24%20134119.png
+
+
+| Component | Detail |
 |-----------|--------|
 | Hypervisor | Hyper-V (Generation 2 VMs) on Windows 11 Pro |
 | Host | Lenovo ThinkPad X1 Carbon, Intel i7-8650U, 16 GB RAM |
