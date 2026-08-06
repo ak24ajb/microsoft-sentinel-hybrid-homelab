@@ -83,6 +83,8 @@ controlled as Sigma and compiled to KQL.
 ---
 
 ## Environment
+<img width="996" height="755" alt="Screenshot 2026-06-24 134119" src="https://github.com/user-attachments/assets/4f949171-ae30-47ff-9f48-27c8db82ea0d" />
+
 
 | Component | Detail |
 |-----------|--------|
