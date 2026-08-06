@@ -1,13 +1,14 @@
-# Hybrid SOC Lab - On-Prem Active Directory into Microsoft Sentinel
+# Hybrid SOC Lab — On-Prem Active Directory into Microsoft Sentinel
 
 A self-built, hybrid Security Operations lab. An on-premises Windows Active Directory
-domain runs on local hardware and ships its security and endpoint telemetry into
+domain runs on local hardware and streams its security and endpoint telemetry into
 **Microsoft Sentinel** (a cloud SIEM) via **Azure Arc** and the **Azure Monitor Agent**.
-Staged attacks are then hunted in the SIEM with **KQL**.
+Staged attacks are detected with scheduled analytics rules, and detections are managed
+**as code** with Sigma compiled to KQL.
 
-The lab is built to be reproducible, threat-informed, and documented to a professional
-standard — not a single-box tutorial. It is an active, growing project; see the
-[Roadmap](#roadmap) for what is built versus what is planned.
+Built to be reproducible, threat-informed and documented to a professional standard —
+not a single-box tutorial. It is an active, growing project; see the [Roadmap](#roadmap)
+for what is built versus planned.
 
 ---
 
@@ -17,10 +18,17 @@ standard — not a single-box tutorial. It is an active, growing project; see th
 |------|-------------|:-----:|
 | Phase 1 | On-prem Active Directory core (DC + client + Sysmon) | ✅ Complete |
 | Phase 2 | Cloud SIEM pipeline (Arc → AMA → DCR → Sentinel → KQL) | ✅ Complete |
-| Step 5 | Hybrid identity (Entra Connect to a personal Entra tenant) | ⏳ Planned |
-| Step 6 | Detections-as-code (saved analytics rules, Sigma → KQL) | ⏳ Planned |
-| Phase 3 | Identity security (Conditional Access, PIM, Identity Protection) | ⏳ Planned |
-| Stage 4 | Threat-informed adversary emulation + ATT&CK coverage | ⏳ Planned |
+| Phase 2 | Detection engineering (analytics rules + detection-as-code) | ✅ Complete |
+| Phase 2 | Hybrid identity (Entra Connect) | ⛔ Parked — needs personal Entra tenant |
+| Next | Purple-team adversary emulation + ATT&CK coverage heatmap | ⏳ Planned |
+| Phase 3 | Identity security (Conditional Access, PIM, Identity Protection) | ⏳ Planned (depends on hybrid identity) |
+| Future | Infrastructure-as-code (Bicep / Terraform) | ⏳ Planned |
+
+> **Parked, not failed:** the Azure for Students subscription lives in the university's
+> Entra tenant where I hold no admin rights, and creating a separate tenant is gated
+> behind a paid-customer / subscription requirement. Hybrid identity and identity-security
+> work will resume in a dedicated personal Entra tenant — the correct place to practise
+> privileged-access controls.
 
 ---
 
@@ -31,10 +39,12 @@ standard — not a single-box tutorial. It is an active, growing project; see th
 - [Build](#build)
   - [Phase 1 — On-prem Active Directory](#phase-1--on-prem-active-directory)
   - [Phase 2 — Cloud SIEM pipeline](#phase-2--cloud-siem-pipeline)
-- [What I detected](#what-i-detected)
+  - [Phase 2 — Detection engineering](#phase-2--detection-engineering)
+- [Detections](#detections)
+- [Detection-as-code](#detection-as-code)
 - [Obstacles and decisions](#obstacles-and-decisions)
 - [Framework mapping](#framework-mapping)
-- [ATT&CK techniques staged](#attck-techniques-staged)
+- [ATT&CK techniques](#attck-techniques)
 - [Skills demonstrated](#skills-demonstrated)
 - [Roadmap](#roadmap)
 - [Repository structure](#repository-structure)
@@ -44,8 +54,9 @@ standard — not a single-box tutorial. It is an active, growing project; see th
 ## Architecture
 
 Telemetry flows from the on-premises domain, up through Azure Arc and the Azure Monitor
-Agent, is filtered by a Data Collection Rule, ingested into Microsoft Sentinel, and
-queried with KQL.
+Agent, is filtered by a Data Collection Rule, ingested into Microsoft Sentinel, and turned
+into incidents by scheduled analytics rules. Detections are authored as Sigma and compiled
+to KQL.
 
 ```mermaid
 flowchart TD
@@ -57,12 +68,17 @@ flowchart TD
   WS --> ARC
   ARC --> DCR["Data Collection Rule<br/>Security event IDs + Sysmon channel"]
   DCR --> SENT["Microsoft Sentinel<br/>law-soc-lab · France Central · 1 GB/day cap"]
-  SENT --> KQL["KQL detection queries<br/>Failed logons · privilege escalation"]
+  SENT --> RULES["Scheduled analytics rules<br/>Brute force · privilege escalation"]
+  RULES --> INC["Incidents<br/>Severity + MITRE ATT&CK tagged"]
+
+  SIGMA["Sigma rules (YAML, in Git)"] -->|pySigma Kusto backend| KQL["Compiled KQL"]
+  KQL -.deployed as.-> RULES
 ```
 
-**Data flow in one line:** on-prem security events and Sysmon telemetry → Azure Arc
-makes the DC cloud-manageable → the Azure Monitor Agent collects per the Data Collection
-Rule → events land in the Sentinel Log Analytics workspace → KQL surfaces the attacks.
+**Data flow in one line:** on-prem security + Sysmon telemetry → Azure Arc makes the DC
+cloud-manageable → the Azure Monitor Agent collects per the Data Collection Rule → events
+land in Sentinel → scheduled analytics rules raise incidents → detections are version-
+controlled as Sigma and compiled to KQL.
 
 ---
 
@@ -73,218 +89,177 @@ Rule → events land in the Sentinel Log Analytics workspace → KQL surfaces th
 | Hypervisor | Hyper-V (Generation 2 VMs) on Windows 11 Pro |
 | Host | Lenovo ThinkPad X1 Carbon, Intel i7-8650U, 16 GB RAM |
 | Domain controller | `DC01` — Windows Server 2022, AD DS / DNS / DHCP, `10.10.10.10` |
-| Workstation | `WS01` — Windows 11, domain-joined, DHCP-assigned `10.10.10.50` |
+| Workstation | `WS01` — Windows 11, domain-joined, `10.10.10.50` |
 | Domain | `corp.lab` (NetBIOS `CORP`) |
 | Lab network | Hyper-V internal switch + NAT, `10.10.10.0/24` (isolated by default) |
 | Endpoint telemetry | Sysmon (community configuration) on both hosts |
 | Cloud | Azure (France Central) — Log Analytics, Microsoft Sentinel, Azure Arc |
-| Funding | Azure for Students credit; Sentinel free trial + 1 GB/day ingestion cap |
+| Detection-as-code | Sigma (YAML) → KQL via `pysigma-backend-kusto` (`azure_monitor` pipeline) |
+| Funding | Azure for Students; Sentinel free trial + 1 GB/day ingestion cap |
 
-> The lab is network-isolated. All offensive activity is adversary *emulation* performed
-> against infrastructure I own, to build detections — not capability for misuse.
+> The lab is network-isolated. All offensive activity is adversary *emulation* against
+> infrastructure I own, to build detections — not capability for misuse.
 
 ---
 
 ## Build
 
-> Commands below are representative of the build. Secrets and credentials are shown as
-> placeholders and were never committed.
+> Commands below are representative. Secrets are shown as placeholders and were never committed.
 
 ### Phase 1 — On-prem Active Directory
 
-**Hyper-V and an isolated lab network (host, elevated PowerShell):**
-
 ```powershell
+# Hyper-V + isolated lab network (host)
 Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All
-
 New-VMSwitch -SwitchName "LAB" -SwitchType Internal
 New-NetIPAddress -IPAddress 10.10.10.1 -PrefixLength 24 -InterfaceAlias "vEthernet (LAB)"
 New-NetNat -Name "LAB-NAT" -InternalIPInterfaceAddressPrefix "10.10.10.0/24"
-```
 
-**Promote DC01 and create the domain (inside DC01):**
-
-```powershell
-New-NetIPAddress -IPAddress 10.10.10.10 -PrefixLength 24 -DefaultGateway 10.10.10.1 -InterfaceAlias "Ethernet"
-Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses 127.0.0.1
-Rename-Computer -NewName "DC01" -Restart
-
+# Promote DC01 + create the domain (inside DC01)
 Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
 Install-ADDSForest -DomainName "corp.lab" -DomainNetbiosName "CORP" -InstallDns -Force
 Add-DnsServerForwarder -IPAddress 1.1.1.1
-```
 
-**DHCP for the lab network:**
-
-```powershell
+# DHCP for the lab network
 Install-WindowsFeature DHCP -IncludeManagementTools
 Add-DhcpServerv4Scope -Name "LAB" -StartRange 10.10.10.50 -EndRange 10.10.10.100 -SubnetMask 255.255.255.0
-Set-DhcpServerv4OptionValue -DnsServer 10.10.10.10 -Router 10.10.10.1 -DnsDomain "corp.lab"
 Add-DhcpServerInDC
-```
 
-**Join WS01 to the domain (inside WS01):**
-
-```powershell
+# Join WS01 to the domain (inside WS01)
 Add-Computer -DomainName "corp.lab" -Credential CORP\Administrator -Restart
-```
 
-**Deploy Sysmon on both hosts** (community config for detection-grade telemetry):
-
-```powershell
+# Sysmon on both hosts (community config)
 .\Sysmon64.exe -accepteula -i sysmonconfig.xml
 ```
 
 ### Phase 2 — Cloud SIEM pipeline
 
-**Workspace, Sentinel, and a cost cap (host, Azure CLI).** Built via CLI after a
-subscription policy blocked portal region selection — see
-[Obstacles](#obstacles-and-decisions).
-
 ```powershell
+# Workspace + Sentinel + cost cap, via Azure CLI (portal region selection blocked by policy)
 $LOC = "francecentral"
 az group create -n rg-soc-lab -l $LOC
 az monitor log-analytics workspace create -g rg-soc-lab -n law-soc-lab -l $LOC
-
-# Enable Microsoft Sentinel on the workspace, then cap ingestion at 1 GB/day
 az monitor log-analytics workspace update -g rg-soc-lab -n law-soc-lab --set workspaceCapping.dailyQuotaGb=1
-```
 
-**Azure Arc-enable DC01** (register providers on the host, then connect from inside DC01):
-
-```powershell
-az provider register --namespace Microsoft.HybridCompute
-az provider register --namespace Microsoft.HybridConnectivity
-az provider register --namespace Microsoft.GuestConfiguration
-```
-
-```powershell
-# Inside DC01 — install and connect the Connected Machine agent
-Invoke-WebRequest -UseBasicParsing -Uri "https://aka.ms/azcmagent-windows" -OutFile "$env:TEMP\install_azcmagent.ps1"
-& "$env:TEMP\install_azcmagent.ps1"
-
+# Azure Arc-enable DC01 (inside DC01)
 & "$env:ProgramFiles\AzureConnectedMachineAgent\azcmagent.exe" connect `
-  --subscription-id "<SUBSCRIPTION_ID>" `
-  --resource-group "rg-soc-lab" `
-  --tenant-id "<TENANT_ID>" `
-  --location "francecentral"
+  --subscription-id "<SUBSCRIPTION_ID>" --resource-group "rg-soc-lab" `
+  --tenant-id "<TENANT_ID>" --location "francecentral"
 ```
 
-**Data Collection Rule** routing Windows Security events to the parsed `SecurityEvent`
-table and Sysmon to the `Event` table. Two data flows in one rule, deployed as code:
+The Data Collection Rule routes Windows Security events to the parsed `SecurityEvent`
+table and Sysmon to the `Event` table (two data flows, deployed as code). Collected
+security event IDs cover brute force (`4625`/`4771`), privileged logon (`4672`), account
+creation and privileged-group membership (`4720`/`4728`/`4732`/`4756`), Kerberos and NTLM
+authentication (`4768`/`4769`/`4776`), service installation (`7045`) and PowerShell
+script-block logging (`4104`) — scoped to keep ingestion volume small.
 
-```jsonc
-{
-  "location": "francecentral",
-  "properties": {
-    "dataSources": {
-      "windowsEventLogs": [
-        {
-          "name": "securityEvents",
-          "streams": ["Microsoft-SecurityEvent"],
-          "xPathQueries": [
-            "Security!*[System[(EventID=4624 or EventID=4625 or EventID=4634 or EventID=4648 or EventID=4672 or EventID=4720 or EventID=4722 or EventID=4724 or EventID=4728 or EventID=4732 or EventID=4737 or EventID=4738 or EventID=4756 or EventID=4768 or EventID=4769 or EventID=4770 or EventID=4771 or EventID=4776 or EventID=7045)]]",
-            "Microsoft-Windows-PowerShell/Operational!*[System[(EventID=4104)]]"
-          ]
-        },
-        {
-          "name": "sysmonEvents",
-          "streams": ["Microsoft-Event"],
-          "xPathQueries": ["Microsoft-Windows-Sysmon/Operational!*[System]"]
-        }
-      ]
-    },
-    "destinations": {
-      "logAnalytics": [
-        { "workspaceResourceId": "<WORKSPACE_RESOURCE_ID>", "name": "laDest" }
-      ]
-    },
-    "dataFlows": [
-      { "streams": ["Microsoft-SecurityEvent"], "destinations": ["laDest"] },
-      { "streams": ["Microsoft-Event"], "destinations": ["laDest"] }
-    ]
-  }
-}
-```
+### Phase 2 — Detection engineering
 
-Why these event IDs: they cover the behaviours staged in this lab — brute force
-(`4625`/`4771`), privileged logon (`4672`), account creation and privileged-group
-membership (`4720`/`4728`), Kerberos and NTLM authentication (`4768`/`4769`/`4776`),
-service installation (`7045`), and PowerShell script-block logging (`4104`) — while
-keeping ingestion volume small.
+- **Azure Activity** connector enabled (subscription-scoped) for control-plane monitoring.
+- **Two scheduled analytics rules** authored with entity mapping and MITRE ATT&CK tagging
+  (see [Detections](#detections)).
+- **Detection-as-code** workflow established: Sigma rules in Git compiled to KQL with the
+  pySigma Kusto backend (see [Detection-as-code](#detection-as-code)).
 
 ---
 
-## What I detected
+## Detections
 
-A small attack was staged on DC01 and then hunted in Sentinel.
+Scheduled analytics rules that run automatically and raise incidents. Incident generation
+was verified by re-running the staged attacks after the rules were enabled.
 
-**The staged activity**
-- A burst of failed authentications against the `sahmed` account (brute-force simulation).
-- Creation of a rogue account (`tanalyst`) and its addition to **Domain Admins** (persistence).
-- PowerShell and process activity for endpoint telemetry.
-
-**Hunting the brute-force burst (KQL):**
+**Brute Force — Failed Logon Burst** · Severity Medium · MITRE **T1110**
 
 ```kql
 SecurityEvent
-| where TimeGenerated > ago(1h)
 | where EventID == 4625
-| summarize FailedAttempts = count() by Account, Computer
-| sort by FailedAttempts desc
+| summarize FailedAttempts = count(),
+            TargetAccounts = make_set(TargetUserName, 10),
+            StartTime = min(TimeGenerated), EndTime = max(TimeGenerated)
+    by Computer
+| where FailedAttempts >= 5
 ```
 
-**Hunting the persistence move:**
+**Persistence — User Added to Privileged Group** · Severity High · MITRE **T1098 / T1078.002**
 
 ```kql
 SecurityEvent
-| where TimeGenerated > ago(1h)
-| where EventID in (4720, 4728)
-| project TimeGenerated, EventID, Activity, Account
-| sort by TimeGenerated asc
+| where EventID in (4728, 4732, 4756)
+| where TargetUserName has_any ("Domain Admins", "Enterprise Admins", "Schema Admins", "Administrators")
+| project TimeGenerated, Computer, Activity,
+          ActorAccount = SubjectUserName, AddedMember = MemberName,
+          PrivilegedGroup = TargetUserName
 ```
 
-**Analyst bird's-eye view — what arrived and how much:**
+Both rules use entity mapping (Host / Account) so Sentinel builds an investigation graph
+and correlates incidents to the affected assets.
 
-```kql
-SecurityEvent
-| where TimeGenerated > ago(1h)
-| summarize Count = count() by EventID
-| sort by Count desc
+> Add screenshots of a fired incident to `docs/` and reference here as evidence.
+
+---
+
+## Detection-as-code
+
+Detections are authored once as vendor-neutral **Sigma** (YAML), version-controlled, and
+compiled to Sentinel KQL — the source of truth is the Sigma rule; the KQL is a build artifact.
+
+```bash
+pip install sigma-cli pysigma-backend-kusto
+sigma convert -t kusto -p azure_monitor detections/sigma/windows/privileged-group-add.yml
 ```
 
-Confirmed populated in `SecurityEvent`: `4624`, `4672`, `4634`, `4648`, `4625`, `4104`,
-plus the `4720`/`4728` persistence events — the full attack narrative, queryable in the
-cloud SIEM.
+Example rule — `detections/sigma/windows/privileged-group-add.yml`:
 
-> Add screenshots of the KQL output to `docs/` and reference them here as evidence
-> (e.g. `![Failed logons](docs/kql-4625.png)`).
+```yaml
+title: User Added to Privileged Active Directory Group
+status: experimental
+description: Detects a user account being added to a privileged AD group (e.g. Domain Admins).
+references:
+  - https://attack.mitre.org/techniques/T1098/
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098
+  - attack.t1078.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: [4728, 4732, 4756]
+    TargetUserName: ['Domain Admins', 'Enterprise Admins', 'Schema Admins']
+  condition: selection
+falsepositives:
+  - Legitimate onboarding of new IT administrators
+level: high
+```
+
+**Pipeline note:** because the data lives in the Log Analytics `SecurityEvent` table, the
+`azure_monitor` pipeline is required. The `microsoft_xdr` pipeline compiles against Defender
+advanced-hunting tables that this lab does not have and would silently match nothing.
 
 ---
 
 ## Obstacles and decisions
 
-Real obstacles, documented as engineering decisions rather than hidden.
+Real obstacles, documented as engineering decisions.
 
 - **Azure for Students region policy.** The subscription is restricted by Azure Policy to
   five regions (`italynorth`, `francecentral`, `germanywestcentral`, `spaincentral`,
-  `swedencentral`). The portal region dropdown does not filter to these, so every "obvious"
-  region failed. Diagnosed by reading the policy assignment's allowed-locations parameter,
-  then provisioned everything via Azure CLI in France Central.
-
-- **Domain-controller Kerberos logon events.** Failed logons against a domain account on a
-  DC frequently surface as Kerberos pre-authentication failures (`4771`) rather than `4625`.
-  The DCR was widened to collect both so brute-force activity is captured reliably on a DC.
-
-- **DCR stream mapping.** An initial rule shipped only Sysmon (`Event` table) and not the
-  Windows Security channel. Diagnosed by validating event generation at source with
-  `Get-WinEvent`, then redeployed the rule as code with an explicit `Microsoft-SecurityEvent`
-  stream so events land in the parsed `SecurityEvent` table.
-
-- **Identity work belongs in a separate tenant.** The Azure for Students subscription lives
-  in the university's Entra tenant, where I hold no admin rights. Hybrid identity and
-  identity-security work (Entra Connect, Conditional Access, PIM) will be done in a
-  separate personal Entra tenant — the correct place to practise privileged-access controls.
+  `swedencentral`); the portal region dropdown does not filter to these. Diagnosed by reading
+  the policy assignment's allowed-locations parameter and provisioned via Azure CLI in France Central.
+- **Domain-controller Kerberos logon events.** Failed logons against a domain account on a DC
+  frequently surface as Kerberos pre-authentication failures (`4771`) rather than `4625`. The
+  DCR was widened to collect both.
+- **DCR stream mapping.** An initial rule shipped only Sysmon and not the Windows Security
+  channel. Diagnosed by validating event generation at source with `Get-WinEvent`, then
+  redeployed the rule as code with an explicit `Microsoft-SecurityEvent` stream.
+- **Tenant / identity governance.** The subscription lives in the university's Entra tenant
+  with no admin rights, and separate-tenant creation is gated. Hybrid identity is deferred to
+  a dedicated personal tenant rather than worked around — the correct place for privileged-access practice.
+- **Sigma backend rename.** The pySigma Microsoft 365 Defender backend was renamed to the
+  Kusto backend; most public tutorials reference the deprecated name and the wrong pipeline.
 
 ---
 
@@ -294,31 +269,33 @@ Real obstacles, documented as engineering decisions rather than hidden.
 |-----------|------------------------|
 | NIST CSF 2.0 | **DE.CM** continuous monitoring; **DE.AE** adverse event analysis; **ID.AM** asset inventory (Arc) |
 | CIS Controls v8 | **1** inventory; **6** access control; **8** audit log management |
-| NCSC CAF | **C1** security monitoring; **B2** identity and access (partial) |
+| NCSC CAF | **C1** security monitoring; **C2** proactive event discovery; **B2** identity and access (partial) |
 | ISO/IEC 27001 (Annex A) | **A.8.15** logging; **A.8.16** monitoring activities; **A.5.15** access control |
 
 ---
 
-## ATT&CK techniques staged
+## ATT&CK techniques
 
-Techniques *emulated* in this lab so far (not a full coverage assessment):
+Techniques staged in this lab, and whether a detection exists for them:
 
-| Technique | ID | Where |
-|-----------|----|-------|
-| Brute Force | T1110 | Failed-logon burst against `sahmed` |
-| Create Account: Domain Account | T1136.002 | Creation of `tanalyst` |
-| Account Manipulation / Valid Accounts | T1098 / T1078.002 | `tanalyst` added to Domain Admins |
-| Command and Scripting Interpreter: PowerShell | T1059.001 | Script-block-logged activity |
-| Event Triggered Execution: Accessibility Features | T1546.008 | Utilman credential-recovery (build phase) |
+| Technique | ID | Detection |
+|-----------|----|:---------:|
+| Brute Force | T1110 | ✅ Analytics rule |
+| Account Manipulation / Valid Accounts | T1098 / T1078.002 | ✅ Analytics rule + Sigma |
+| Create Account: Domain Account | T1136.002 | Telemetry collected (rule pending) |
+| Command and Scripting Interpreter: PowerShell | T1059.001 | Telemetry collected (4104) |
+| Event Triggered Execution: Accessibility Features | T1546.008 | Observed (build phase) |
+
+> A full ATT&CK Navigator coverage heatmap will be produced during the adversary-emulation phase.
 
 ---
 
 ## Skills demonstrated
 
-Microsoft Sentinel · Log Analytics · KQL · Azure Arc · Azure Monitor Agent ·
-Data Collection Rules · Sysmon · Windows Active Directory (AD DS, DNS, DHCP) ·
-Hyper-V virtualisation · Azure CLI · PowerShell · detection engineering ·
-SIEM cost control · MITRE ATT&CK.
+Microsoft Sentinel · Log Analytics · KQL · scheduled analytics rules · incident triage ·
+entity mapping · detection engineering · **detection-as-code (Sigma → KQL, pySigma)** ·
+Azure Arc · Azure Monitor Agent · Data Collection Rules · Sysmon · MITRE ATT&CK ·
+Windows Active Directory (AD DS, DNS, DHCP) · Hyper-V · Azure CLI · PowerShell · SIEM cost control.
 
 Doubles as hands-on preparation for **SC-200** and **AZ-500**.
 
@@ -326,10 +303,11 @@ Doubles as hands-on preparation for **SC-200** and **AZ-500**.
 
 ## Roadmap
 
-- **Hybrid identity** — create a personal Entra ID tenant and sync `corp.lab` via Entra Connect.
-- **Detections-as-code** — convert the KQL above into saved Sentinel analytics rules; author Sigma rules in version control and convert to KQL.
+- **Purple-team adversary emulation** — Atomic Red Team / Caldera mapped to MITRE ATT&CK,
+  detections validated, and an ATT&CK Navigator coverage heatmap produced. *(Next.)*
+- **Hybrid identity** — personal Entra tenant + Entra Connect (currently parked).
 - **Identity security** — Conditional Access, MFA, Privileged Identity Management, Identity Protection.
-- **Adversary emulation** — Atomic Red Team / Caldera mapped to MITRE ATT&CK, with an ATT&CK Navigator coverage heatmap.
+- **CI/CD for detections** — GitHub Actions to validate and auto-deploy Sigma rules to Sentinel.
 - **Infrastructure-as-code** — redeploy the cloud components with Bicep or Terraform.
 
 ---
@@ -339,14 +317,16 @@ Doubles as hands-on preparation for **SC-200** and **AZ-500**.
 ```text
 hybrid-soc-lab/
 ├── README.md
-├── docs/                 # screenshots, architecture exports
+├── docs/                       # screenshots, architecture exports
 ├── build/
-│   ├── phase1-ad/        # AD / DHCP / DNS / Sysmon scripts
-│   └── phase2-sentinel/  # az CLI, DCR JSON
+│   ├── phase1-ad/              # AD / DHCP / DNS / Sysmon scripts
+│   └── phase2-sentinel/        # az CLI, DCR JSON
 ├── detections/
-│   └── kql/              # hunting queries (future: Sigma rules)
+│   ├── sigma/windows/          # source of truth — hand-written Sigma
+│   ├── kql/                    # build artifacts — generated from Sigma
+│   └── analytics-rules/        # exported Sentinel rule definitions
 └── attack/
-    └── staging/          # emulation scripts (lab-isolated)
+    └── staging/                # emulation scripts (lab-isolated)
 ```
 
 ---
