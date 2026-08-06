@@ -83,7 +83,7 @@ controlled as Sigma and compiled to KQL.
 ---
 
 ## Environment
-
+Screenshot 2026-06-24 134119.png
 | Component | Detail |
 |-----------|--------|
 | Hypervisor | Hyper-V (Generation 2 VMs) on Windows 11 Pro |
